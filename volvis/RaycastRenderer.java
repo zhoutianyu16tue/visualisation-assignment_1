@@ -97,11 +97,47 @@ public class RaycastRenderer extends Renderer implements TFChangeListener {
             return 0;
         }
 
-        int x = (int) Math.floor(coord[0]);
-        int y = (int) Math.floor(coord[1]);
-        int z = (int) Math.floor(coord[2]);
+        int xFloor = (int) Math.floor(coord[0]);
+        int yFloor = (int) Math.floor(coord[1]);
+        int zFloor = (int) Math.floor(coord[2]);
+        
+        if (xFloor < 0 || xFloor >= volume.getDimX() || yFloor < 0 || yFloor >= volume.getDimY()
+                || zFloor < 0 || zFloor >= volume.getDimZ()) {
+            return 0;
+        }
+        
+        int xCeil = (int) Math.ceil(coord[0]);
+        int yCeil = (int) Math.ceil(coord[1]);
+        int zCeil = (int) Math.ceil(coord[2]);
+        
+        if (xCeil < 0 || xCeil >= volume.getDimX() || yCeil < 0 || yCeil >= volume.getDimY()
+                || zCeil < 0 || zCeil >= volume.getDimZ()) {
+            return 0;
+        }
+        
+        double xd = coord[0] - xFloor;
+        double yd = coord[1] - yFloor;
+        double zd = coord[2] - zFloor;
 
-        return volume.getVoxel(x, y, z);
+        short c000 = volume.getVoxel(xFloor, yFloor, zFloor);
+        short c100 = volume.getVoxel(xCeil, yFloor, zFloor);
+        short c010 = volume.getVoxel(xFloor, yCeil, zFloor);
+        short c110 = volume.getVoxel(xCeil, yCeil, zFloor);
+        short c001 = volume.getVoxel(xFloor, yFloor, zCeil);
+        short c101 = volume.getVoxel(xCeil, yFloor, zCeil);
+        short c011 = volume.getVoxel(xFloor, yCeil, zCeil);
+        short c111 = volume.getVoxel(xCeil, yCeil, zCeil);
+        
+        double c00 = c000 * (1 - xd) + c100 * xd;
+        double c01 = c001 * (1 - xd) + c101 * xd;
+        double c10 = c010 * (1 - xd) + c110 * xd;
+        double c11 = c011 * (1 - xd) + c111 * xd;
+        
+        double c0 = c00 * (1 - yd) + c10 * yd;
+        double c1 = c01 * (1 - yd) + c11 * yd;
+        
+        double c = c0 * (1 - zd) + c1 * zd;
+        return (short)(Math.floor(c));
     }
 
 
