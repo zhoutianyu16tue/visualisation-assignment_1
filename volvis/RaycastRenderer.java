@@ -30,6 +30,16 @@ public class RaycastRenderer extends Renderer implements TFChangeListener {
     TransferFunctionEditor tfEditor;
     TransferFunction2DEditor tfEditor2D;
     
+    public enum RENDER_MODE {
+        SLICER, MIP
+    }
+    private RENDER_MODE mode = RENDER_MODE.SLICER;
+    
+    public void setMode(RENDER_MODE mode){
+        this.mode = mode;
+        this.changed();
+    }
+    
     public RaycastRenderer() {
         panel = new RaycastRendererPanel(this);
         panel.setSpeedLabel("0");
@@ -95,7 +105,7 @@ public class RaycastRenderer extends Renderer implements TFChangeListener {
     }
 
 
-    void slicer(double[] viewMatrix) {
+    public void slicer() {
 
         // clear image
         for (int j = 0; j < image.getHeight(); j++) {
@@ -157,6 +167,108 @@ public class RaycastRenderer extends Renderer implements TFChangeListener {
 
     }
 
+    public void maxIntensityProjection(){
+        for (int j = 0; j < image.getHeight(); j++) {
+            for (int i = 0; i < image.getWidth(); i++) {
+                image.setRGB(i, j, 0);
+            }
+        }
+
+        // vector uVec and vVec define a plane through the origin, 
+        // perpendicular to the view vector viewVec
+        double[] viewVec = new double[3];
+        double[] uVec = new double[3];
+        double[] vVec = new double[3];
+        VectorMath.setVector(viewVec, viewMatrix[2], viewMatrix[6], viewMatrix[10]);
+        VectorMath.setVector(uVec, viewMatrix[0], viewMatrix[4], viewMatrix[8]);
+        VectorMath.setVector(vVec, viewMatrix[1], viewMatrix[5], viewMatrix[9]);
+
+        // image is square
+        int imageCenter = image.getWidth() / 2;
+
+        double[] pixelCoord = new double[3];
+        double[] volumeCenter = new double[3];
+        VectorMath.setVector(volumeCenter, volume.getDimX() / 2, volume.getDimY() / 2, volume.getDimZ() / 2);
+
+        // sample on a plane through the origin of the volume data
+        double max = volume.getMaximum();
+        TFColor voxelColor = new TFColor();
+        
+        int[][] volumeBoundary = new int[3][2];
+        volumeBoundary[0][0] = -volume.getDimX() / 2;
+        volumeBoundary[0][1] = volume.getDimX() / 2;
+        volumeBoundary[1][0] = -volume.getDimY() / 2;
+        volumeBoundary[1][1] = volume.getDimY() / 2;
+        volumeBoundary[2][0] = -volume.getDimZ() / 2;
+        volumeBoundary[2][1] = volume.getDimZ() / 2;
+        
+        int start = 0;
+        int end = 0;
+        
+        for (int j = 0; j < image.getHeight(); j++) {
+            for (int i = 0; i < image.getWidth(); i++) {
+                
+                int kstart = Integer.MIN_VALUE;
+                int kend = Integer.MAX_VALUE;
+                double[] voxelCoordStart = new double[3];
+                
+                for(int k = 0; k < 3; k++){
+                    voxelCoordStart[k] = uVec[k] * (i - imageCenter) + vVec[k] * (j - imageCenter);
+                    
+                    if(viewVec[k] == 0){
+                        if(voxelCoordStart[k] < volumeBoundary[k][0] || voxelCoordStart[k] > volumeBoundary[k][1]){
+                            kstart = kend = 0;
+                            break;
+                        }
+                    }else{
+                        start = (int)((volumeBoundary[k][0] - voxelCoordStart[k]) / viewVec[k]);
+                        end = (int)((volumeBoundary[k][1] - voxelCoordStart[k]) / viewVec[k]);
+                        
+                        if(start > end){
+                            int tmp = start;
+                            start = end;
+                            end = tmp;
+                        }
+                    
+                        if(start > kstart){
+                            kstart = start;
+                        }
+                    
+                        if(end < kend){
+                            kend = end;
+                        }
+                    }
+                }
+                
+                int maxIntensity = 0;
+                
+                for(int k = kstart; k < kend; k+=1){
+                    pixelCoord[0] = voxelCoordStart[0] + viewVec[0] * k + volumeCenter[0];
+                    pixelCoord[1] = voxelCoordStart[1] + viewVec[1] * k + volumeCenter[1];
+                    pixelCoord[2] = voxelCoordStart[2] + viewVec[2] * k + volumeCenter[2];
+                        
+                    int val = getVoxel(pixelCoord);
+                    if(val > maxIntensity){
+                        maxIntensity = val;
+                    }
+                }
+                
+                voxelColor.r = maxIntensity/max;
+                voxelColor.g = voxelColor.r;
+                voxelColor.b = voxelColor.r;
+                voxelColor.a = maxIntensity > 0 ? 1.0 : 0.0;  // this makes intensity 0 completely transparent and the rest opaque
+
+                // BufferedImage expects a pixel color packed as ARGB in an int
+                int c_alpha = voxelColor.a <= 1.0 ? (int) Math.floor(voxelColor.a * 255) : 255;
+                int c_red = voxelColor.r <= 1.0 ? (int) Math.floor(voxelColor.r * 255) : 255;
+                int c_green = voxelColor.g <= 1.0 ? (int) Math.floor(voxelColor.g * 255) : 255;
+                int c_blue = voxelColor.b <= 1.0 ? (int) Math.floor(voxelColor.b * 255) : 255;
+                int pixelColor = (c_alpha << 24) | (c_red << 16) | (c_green << 8) | c_blue;
+                image.setRGB(i, j, pixelColor);
+            }
+        }
+
+    }
 
     private void drawBoundingBox(GL2 gl) {
         gl.glPushAttrib(GL2.GL_CURRENT_BIT);
@@ -230,7 +342,15 @@ public class RaycastRenderer extends Renderer implements TFChangeListener {
         gl.glGetDoublev(GL2.GL_MODELVIEW_MATRIX, viewMatrix, 0);
 
         long startTime = System.currentTimeMillis();
-        slicer(viewMatrix);    
+        
+        switch (this.mode) {
+            case MIP:
+                this.maxIntensityProjection();
+                break;
+            case SLICER:
+                this.slicer();
+                break;
+        }
         
         long endTime = System.currentTimeMillis();
         double runningTime = (endTime - startTime);
@@ -281,4 +401,5 @@ public class RaycastRenderer extends Renderer implements TFChangeListener {
             listeners.get(i).changed();
         }
     }
+    
 }
